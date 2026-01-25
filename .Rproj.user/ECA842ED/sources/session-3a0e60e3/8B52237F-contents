@@ -1,0 +1,19 @@
+# Launch (Deploy) the App
+
+# Authorize account
+rsconnect::setAccountInfo(name='kaushalyakd',
+                          token='BC008C22BC997B2E42ED60D0BC6B8EAA',
+                          secret='ke6IW0qSoYvOFg2DkE2t7gn3h1JGE5HtJFOrH87T')
+
+# Deploy
+library(rsconnect)
+
+deployApp('BP_Allocation')
+deployApp('LP_Allocation')
+
+# Above code is enough, no need to run the below code
+shiny::runApp('BP_Allocation')
+shiny::runApp('LP_Allocation')
+
+
+

@@ -1,0 +1,303 @@
+# load libraries
+
+library(shiny)
+library(dplyr)
+library(readxl)
+library(tidyr)
+library(lubridate)
+library(openxlsx)
+library(ggplot2)
+library(patchwork)
+library(munsell)
+
+# Increase upload limit to 100MB
+options(shiny.maxRequestSize = 100*1024^2)
+
+# Define UI for application
+ui <- fluidPage(
+  titlePanel("Blade Plotter Allocation System"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      
+      fileInput("file", "Upload Cutting.xlsx", accept = ".xlsx"),
+      
+      # Editable plotter pools
+      selectInput("poolsA", "Pools for Plotter A:",
+                  choices = c("CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G", "TEXTILE",
+                              "CUSDN-PK", "ODDOWN", "ODUP", "ODUP-Pk", "SBOEM", "SBOEM-DW"),
+                  selected = c("CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G", "TEXTILE"),
+                  multiple = TRUE),
+      
+      selectInput("poolsB", "Pools for Plotter B:",
+                  choices = c("CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G", "TEXTILE",
+                              "CUSDN-PK", "ODDOWN", "ODUP", "ODUP-Pk", "SBOEM", "SBOEM-DW"),
+                  selected = c("CUSDN-PK", "ODDOWN", "SBOEM-DW"),
+                  multiple = TRUE),
+      
+      selectInput("poolsE", "Pools for Plotter E:",
+                  choices = c("CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G", "TEXTILE",
+                              "CUSDN-PK", "ODDOWN", "ODUP", "ODUP-Pk", "SBOEM", "SBOEM-DW"),
+                  selected = c("ODDOWN", "CUSDN-PK", "TEXTILE", "ODUP", "ODUP-Pk", "SBOEM"),
+                  multiple = TRUE),
+      
+      selectInput("poolsF", "Pools for Plotter F:",
+                  choices = c("CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G", "TEXTILE",
+                              "CUSDN-PK", "ODDOWN", "ODUP", "ODUP-Pk", "SBOEM", "SBOEM-DW"),
+                  selected = c("ODUP", "ODUP-Pk", "TEXTILE", "CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G"),
+                  multiple = TRUE),
+      
+      selectInput("poolsH", "Pools for Plotter H:",
+                  choices = c("CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G", "TEXTILE",
+                              "CUSDN-PK", "ODDOWN", "ODUP", "ODUP-Pk", "SBOEM", "SBOEM-DW"),
+                  selected = c("SBOEM", "TEXTILE", "CUSUP-PK", "CUSUP-PK-L", "CUSUP-PK-G"),
+                  multiple = TRUE),
+      
+      # Capacities
+      numericInput("capacityA", "Daily capacity - Plotter A:", 25*16*0.6),
+      numericInput("capacityB", "Daily capacity - Plotter B:", 55*16*0.6),
+      numericInput("capacityE", "Daily capacity - Plotter E:", 55*16*0.6),
+      numericInput("capacityF", "Daily capacity - Plotter F:", 25*16*0.6),
+      numericInput("capacityH", "Daily capacity - Plotter H:", 25*16*0.6),
+      
+      actionButton("run", "Run Allocation", class = "btn-primary"),
+      
+      br(), br(),
+      
+      downloadButton("downloadExcel", "Download Excel Output")
+    ),
+    
+    mainPanel(
+      tabsetPanel(
+        tabPanel("BP Allocation", tableOutput("BP_table")),
+        tabPanel("Summary", tableOutput("summary_table")),
+        tabPanel("Clustered Chart", plotOutput("chart")),
+        tabPanel("Pool Pie Charts", plotOutput("pool_pie_charts", height = "900px"))
+      )
+    )
+  )
+)
+
+# Define required server logic 
+server <- function(input, output, session) {
+  
+  allocation_result <- eventReactive(input$run, {
+    
+    req(input$file)
+    
+    # Load Excel file
+    df <- read_excel(input$file$datapath) %>%
+      mutate(
+        ShipDate = as.Date(`Ship Date`),
+        Meters = suppressWarnings(as.numeric(`M9000 - Blade(m)`))
+      ) %>%
+      filter(!is.na(Meters) & Meters > 0) %>%
+      arrange(ShipDate)
+    
+    # Editable pools from UI
+    plotter_Pools <- list(
+      A = input$poolsA,
+      B = input$poolsB,
+      E = input$poolsE,
+      F = input$poolsF,
+      H = input$poolsH
+    )
+    
+    # Editable capacities
+    daily_capacity <- c(
+      A = input$capacityA,
+      B = input$capacityB,
+      E = input$capacityE,
+      F = input$capacityF,
+      H = input$capacityH
+    )
+    
+    # Allocation function
+    allocate_plotter <- function(df, allowed_pools, capacity, used) {
+      
+      plot_df <- df %>%
+        filter(Pool %in% allowed_pools, !(`MO Number` %in% used)) %>%
+        arrange(ShipDate)
+      
+      if (nrow(plot_df) == 0) {
+        return(list(MOs = character(), Total = 0, Remaining = capacity))
+      }
+      
+      total <- 0
+      selected <- c()
+      
+      for (i in seq_len(nrow(plot_df))) {
+        meters_i <- plot_df$Meters[i]
+        if (total + meters_i <= capacity) {
+          selected <- c(selected, plot_df$`MO Number`[i])
+          total <- total + meters_i
+        }
+      }
+      
+      return(list(MOs = selected, Total = total, Remaining = capacity - total))
+    }
+    
+    # Master allocation
+    used <- c()
+    allocation_list <- list()
+    summary_list <- list()
+    
+    for (p in names(plotter_Pools)) {
+      result <- allocate_plotter(df, plotter_Pools[[p]], daily_capacity[p], used)
+      used <- c(used, result$MOs)
+      allocation_list[[p]] <- result$MOs
+      
+      summary_list[[p]] <- data.frame(
+        Plotter = p,
+        Total_MOs = length(result$MOs),
+        Total_Meters = result$Total,
+        Target_Meters = daily_capacity[p],
+        Remaining_Meters = result$Remaining
+      )
+    }
+    
+    max_rows <- max(sapply(allocation_list, length))
+    
+    BP_allocation <- data.frame(
+      A = c(allocation_list$A, rep(NA, max_rows - length(allocation_list$A))),
+      B = c(allocation_list$B, rep(NA, max_rows - length(allocation_list$B))),
+      E = c(allocation_list$E, rep(NA, max_rows - length(allocation_list$E))),
+      F = c(allocation_list$F, rep(NA, max_rows - length(allocation_list$F))),
+      H = c(allocation_list$H, rep(NA, max_rows - length(allocation_list$H)))
+    )
+    
+    summary_output <- bind_rows(summary_list) %>%
+      mutate(Efficiency = round((Total_Meters / Target_Meters) * 100, 1))
+    
+    summary_cluster <- summary_output %>%
+      select(Plotter, Total_Meters, Target_Meters)
+    
+    summary_cluster <- rbind(
+      summary_cluster,
+      data.frame(
+        Plotter = "TOTAL",
+        Total_Meters = sum(summary_cluster$Total_Meters),
+        Target_Meters = sum(summary_cluster$Target_Meters)
+      )
+    )
+    
+    list(
+      BP_allocation = BP_allocation,
+      summary_output = summary_output,
+      summary_cluster = summary_cluster
+    )
+  })
+  
+  output$BP_table <- renderTable({
+    allocation_result()$BP_allocation
+  })
+  
+  output$summary_table <- renderTable({
+    allocation_result()$summary_output
+  })
+  
+  # Clustered bar chart
+  output$chart <- renderPlot({
+    mat <- rbind(
+      allocation_result()$summary_cluster$Total_Meters,
+      allocation_result()$summary_cluster$Target_Meters
+    )
+    
+    bp <- barplot(
+      mat,
+      beside = TRUE,
+      col = c("steelblue", "green"),
+      names.arg = allocation_result()$summary_cluster$Plotter,
+      main = "Total Meters vs Target Meters",
+      ylab = "Meters",
+      xlab = "Plotter",
+      ylim = c(0, max(mat) * 1.25),
+      las = 1
+    )
+    
+    text(x = bp, y = mat, labels = round(mat, 1), pos = 3)
+    legend("topleft", legend = c("Total Meters", "Target Meters"),
+           fill = c("steelblue", "green"))
+  })
+  
+  # Pie Charts
+  output$pool_pie_charts <- renderPlot({
+    
+    req(input$file)
+    
+    df_alloc <- allocation_result()
+    plotters <- c("A","B","E","F","H")
+    
+    pie_list <- list()
+    
+    # Read original file once
+    original_df <- read_excel(input$file$datapath) %>%
+      mutate(MO = `MO Number`, Pool = as.character(Pool))
+    
+    for(p in plotters){
+      allocated_MOs <- df_alloc$BP_allocation[[p]]
+      allocated_MOs <- allocated_MOs[!is.na(allocated_MOs)]
+      
+      if(length(allocated_MOs) == 0){
+        # If no allocation, create empty plot with message
+        pie_list[[p]] <- ggplot() +
+          annotate("text", x=0, y=0, label = paste("Plotter", p, "\nNo MOs allocated"), size=5) +
+          theme_void()
+      } else {
+        temp <- original_df %>%
+          filter(MO %in% allocated_MOs) %>%
+          group_by(Pool) %>%
+          summarise(Count = n(), .groups = "drop") %>%
+          mutate(Percentage = round(100*Count/sum(Count),1),
+                 Label = paste0(Count, " (", Percentage, "%)"))
+        
+        pie_list[[p]] <- ggplot(temp, aes(x="", y=Count, fill=Pool)) +
+          geom_col(width=1) +
+          coord_polar(theta="y") +
+          geom_text(aes(label=Label), position=position_stack(vjust=0.5), size=4) +
+          labs(title = paste("Plotter", p, "Pool Distribution"),
+               subtitle = "Count and Percentage of Allocated MOs") +
+          theme_void() +
+          theme(
+            plot.title = element_text(size=16, face="bold", hjust=0.5),
+            plot.subtitle = element_text(size=12, hjust=0.5),
+            legend.position = "right"
+          )
+      }
+    }
+    
+    patchwork::wrap_plots(pie_list, ncol = 2)
+  })
+  
+  
+  
+  output$downloadExcel <- downloadHandler(
+    filename = function() {"Blade_Plotter_Allocation.xlsx"},
+    content = function(file) {
+      
+      wb <- createWorkbook()
+      addWorksheet(wb, "BP_Allocation")
+      addWorksheet(wb, "Summary")
+      
+      writeData(wb, "BP_Allocation", allocation_result()$BP_allocation)
+      writeData(wb, "Summary", allocation_result()$summary_output)
+      
+      # Save the chart
+      png("BP_chart.png", width = 1200, height = 800)
+      mat <- rbind(
+        allocation_result()$summary_cluster$Total_Meters,
+        allocation_result()$summary_cluster$Target_Meters
+      )
+      barplot(mat, beside = TRUE, col = c("steelblue", "green"),
+              names.arg = allocation_result()$summary_cluster$Plotter)
+      dev.off()
+      
+      insertImage(wb, "Summary", "BP_chart.png", width = 7, height = 5, startCol = 8, startRow = 2)
+      saveWorkbook(wb, file, overwrite = TRUE)
+    }
+  )
+  
+}
+
+# Run the application 
+shinyApp(ui, server)
