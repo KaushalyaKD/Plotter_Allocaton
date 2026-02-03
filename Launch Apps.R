@@ -32,3 +32,4 @@ writeLines(index_html, "docs/index.html")
 
 # Check the apps locally
 httpuv::runStaticServer("docs/", port = 8080)
+  
