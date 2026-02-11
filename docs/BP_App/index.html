@@ -1,81 +1,88 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BP App</title>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BP App</title>
 
-    <!-- ShinyLive scripts and styles -->
-    <script src="./shinylive/load-shinylive-sw.js" type="module"></script>
-    <link rel="stylesheet" href="./shinylive/style-resets.css" />
-    <link rel="stylesheet" href="./shinylive/shinylive.css" />
+  <!-- ShinyLive scripts and styles -->
+  <script src="./shinylive/load-shinylive-sw.js" type="module"></script>
+  <link rel="stylesheet" href="./shinylive/style-resets.css" />
+  <link rel="stylesheet" href="./shinylive/shinylive.css" />
 
-    <!-- Spinner CSS -->
-    <style>
-      /* Full-page loading overlay */
-      #loading-screen {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: white;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        z-index: 1000;
-        font-family: sans-serif;
-        color: #333;
+  <!-- Loading screen CSS -->
+  <style>
+    /* Full-page loading overlay */
+    #loading-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: white;
+      display: flex; /* ensures visible immediately */
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      font-family: sans-serif;
+      color: #333;
+    }
+
+    /* Spinner animation */
+    .spinner {
+      border: 6px solid #f3f3f3;
+      border-top: 6px solid #3498db;
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg);}
+      100% { transform: rotate(360deg);}
+    }
+
+    /* Optional loading text style */
+    #loading-text {
+      font-size: 1.5rem;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <!-- Loading overlay -->
+  <div id="loading-screen">
+    <div class="spinner"></div>
+    <div id="loading-text">Loading... Please wait</div>
+  </div>
+
+  <!-- ShinyLive mount point -->
+  <div style="height: 100vh; width: 100vw" id="root"></div>
+
+  <!-- Initialize ShinyLive app -->
+  <script type="module">
+    // Ensure the loading screen is visible immediately
+    document.getElementById("loading-screen").style.display = "flex";
+
+    import { runExportedApp } from "./shinylive/shinylive.js";
+
+    // Run the ShinyLive app
+    runExportedApp({
+      id: "root",
+      appEngine: "r",
+      relPath: "",
+    }).then(() => {
+      const loader = document.getElementById("loading-screen");
+      if (loader) {
+        // Smooth fade-out
+        loader.style.transition = "opacity 0.5s ease";
+        loader.style.opacity = 0;
+        setTimeout(() => loader.style.display = "none", 500);
       }
-
-      /* Spinner animation */
-      .spinner {
-        border: 6px solid #f3f3f3; /* Light gray */
-        border-top: 6px solid #3498db; /* Blue */
-        border-radius: 50%;
-        width: 60px;
-        height: 60px;
-        animation: spin 1s linear infinite;
-        margin-bottom: 20px;
-      }
-
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-
-      /* Optional: Loading text style */
-      #loading-text {
-        font-size: 1.5rem;
-        font-weight: 500;
-      }
-    </style>
-  </head>
-
-  <body>
-    <!-- Loading screen -->
-    <div id="loading-screen">
-      <div class="spinner"></div>
-      <div id="loading-text">Loading... Please wait</div>
-    </div>
-
-    <!-- ShinyLive mount point -->
-    <div style="height: 100vh; width: 100vw" id="root"></div>
-
-    <!-- Initialize ShinyLive app -->
-    <script type="module">
-      import { runExportedApp } from "./shinylive/shinylive.js";
-
-      runExportedApp({
-        id: "root",
-        appEngine: "r",
-        relPath: "",
-      }).then(() => {
-        // Hide the loading screen once the app is ready
-        const loader = document.getElementById("loading-screen");
-        if (loader) loader.style.display = "none";
-      });
-    </script>
-  </body>
+    });
+  </script>
+</body>
 </html>
